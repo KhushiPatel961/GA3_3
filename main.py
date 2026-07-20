@@ -7,7 +7,7 @@ from pydantic import BaseModel, Field
 from google import genai
 from google.genai import types
 
-# Initialize client (uses GEMINI_API_KEY from env)
+# Initialize client using the new google-genai SDK layout
 try:
     client = genai.Client()
 except Exception as e:
@@ -24,19 +24,20 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Pydantic schema enforces the exact object model layout requested by the grader
+# Enforce the strict schema payload structure required by the validator
 class InvoiceExtraction(BaseModel):
-    invoice_no: Optional[str] = Field(None, description="The invoice number string value")
-    date: Optional[str] = Field(None, description="The date format string formatted exactly as YYYY-MM-DD")
-    vendor: Optional[str] = Field(None, description="The name of the selling company or vendor")
-    amount: Optional[float] = Field(None, description="The subtotal dollar/rupee amount BEFORE tax applied")
-    tax: Optional[float] = Field(None, description="The isolated tax amount value only")
-    currency: Optional[str] = Field(None, description="The standardized 3-letter currency code (e.g. INR, USD)")
+    invoice_no: Optional[str] = Field(None, description="The invoice number string")
+    date: Optional[str] = Field(None, description="The date formatted as YYYY-MM-DD")
+    vendor: Optional[str] = Field(None, description="The name of the selling vendor")
+    amount: Optional[float] = Field(None, description="The subtotal dollar amount BEFORE tax")
+    tax: Optional[float] = Field(None, description="The isolated tax amount value")
+    currency: Optional[str] = Field(None, description="The standardized 3-letter currency code")
 
 class InvoiceRequest(BaseModel):
     invoice_text: str
 
-@app.post("/extract", response_model=InvoiceExtraction)
+# FIX: Root route execution mapping
+@app.post("/", response_model=InvoiceExtraction)
 async def extract_invoice(payload: InvoiceRequest):
     try:
         system_instruction = (
@@ -46,7 +47,6 @@ async def extract_invoice(payload: InvoiceRequest):
             "Ensure amount maps to the item subtotal before taxes, and tax isolates the levy amounts."
         )
 
-        # Force the Gemini model to respond matching our strict JSON blueprint layout
         config = types.GenerateContentConfig(
             system_instruction=system_instruction,
             temperature=0.0,
@@ -60,12 +60,10 @@ async def extract_invoice(payload: InvoiceRequest):
             config=config
         )
 
-        # The response.text string is guaranteed to parse straight into our target shape
         result_data = InvoiceExtraction.model_validate_json(response.text)
         return result_data
 
     except Exception as e:
-        print("--- DETAILED ERROR TRACEBACK ---")
+        print("--- SERVER ERROR LOG ---")
         traceback.print_exc()
-        print("--------------------------------")
         raise HTTPException(status_code=500, detail=str(e))
